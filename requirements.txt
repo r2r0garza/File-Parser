@@ -1,0 +1,13 @@
+fastapi[all]
+uvicorn
+python-docx
+pdfplumber
+pandas
+python-multipart
+pytest
+httpx
+openpyxl
+python-pptx
+extract-msg
+pytesseract
+Pillow
