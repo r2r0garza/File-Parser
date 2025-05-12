@@ -1,13 +1,12 @@
 FROM python:3.12-slim
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt update && apt install -y \
   libreoffice \
   unoconv \
   tesseract-ocr \
   poppler-utils \
-  unrar \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
+  && apt clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
