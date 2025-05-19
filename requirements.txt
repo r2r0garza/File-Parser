@@ -11,3 +11,6 @@ python-pptx
 extract-msg
 pytesseract
 Pillow
+flask
+requests
+python-dotenv

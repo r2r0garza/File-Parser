@@ -1,5 +1,7 @@
 import logging
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+import base64
+import requests
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,6 +18,15 @@ import email.policy
 import subprocess
 import pytesseract
 from PIL import Image
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# LLaVA configuration
+LLAVA_USE = os.getenv("LLAVA_USE", "false").lower() == "true"
+LLAVA_URL = os.getenv("LLAVA_URL", "http://localhost:1234/v1/chat/completions")
+LLAVA_MODEL_NAME = os.getenv("LLAVA_MODEL_NAME", "llava-1.6-mistral-7b")
 
 app = FastAPI()
 
@@ -209,12 +220,18 @@ def parse_msg(file_path: str) -> str:
     logger.error(f"Error parsing .msg: {e}")
     return ""
 
-# Parser for image files (.png, .jpg, .jpeg) using pytesseract
+# Parser for image files (.png, .jpg, .jpeg) using pytesseract or LLaVA
 def parse_image(file_path: str) -> str:
   try:
-    img = Image.open(file_path)
-    text = pytesseract.image_to_string(img)
-    return text
+    # If LLaVA is not enabled, use pytesseract
+    if not LLAVA_USE:
+      img = Image.open(file_path)
+      text = pytesseract.image_to_string(img)
+      return text
+    else:
+      # For LLaVA, we'll return a placeholder as the actual processing
+      # happens in the /caption endpoint
+      return "[Image processed by LLaVA. Use /caption endpoint for detailed description.]"
   except Exception as e:
     logger.error(f"Error parsing image file: {e}")
     return ""
@@ -348,3 +365,58 @@ async def xlsx_to_markdown(file: UploadFile = File(...)):
   except Exception as e:
     logger.error(f"Error in /xlsx-to-md: {e}")
     raise HTTPException(status_code=500, detail=f"Failed to convert XLSX to Markdown: {str(e)}")
+
+# /caption endpoint for LLaVA image processing
+@app.post("/caption")
+async def caption(
+  image: UploadFile = File(...),
+  system_prompt: str = Form("You are a helpful assistant.")
+):
+  try:
+    if not LLAVA_USE:
+      raise HTTPException(
+        status_code=400, 
+        detail="LLaVA integration is disabled. Set LLAVA_USE=true in .env to enable."
+      )
+    
+    # Read and encode image to base64
+    image_content = await image.read()
+    image_b64 = base64.b64encode(image_content).decode("utf-8")
+    image_mime = image.content_type or "image/png"
+    
+    # Build payload for LLaVA
+    payload = {
+      "model": LLAVA_MODEL_NAME,
+      "messages": [
+        {"role": "system", "content": system_prompt},
+        {
+          "role": "user",
+          "content": [
+            {"type": "text", "text": "Describe the image in detail."},
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": f"data:{image_mime};base64,{image_b64}"
+              }
+            }
+          ]
+        }
+      ],
+      "max_tokens": 512
+    }
+    
+    # Send request to LLaVA server
+    response = requests.post(LLAVA_URL, json=payload)
+    
+    # Check if the request was successful
+    if response.status_code != 200:
+      logger.error(f"LLaVA server error: {response.text}")
+      raise HTTPException(
+        status_code=response.status_code,
+        detail=f"LLaVA server error: {response.text}"
+      )
+    
+    return response.json()
+  except Exception as e:
+    logger.error(f"Error in /caption: {e}")
+    raise HTTPException(status_code=500, detail=f"Failed to process image with LLaVA: {str(e)}")
