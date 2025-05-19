@@ -388,11 +388,10 @@ async def caption(
     payload = {
       "model": LLAVA_MODEL_NAME,
       "messages": [
-        {"role": "system", "content": system_prompt},
         {
           "role": "user",
           "content": [
-            {"type": "text", "text": "Describe the image in detail."},
+            {"type": "text", "text": f"{system_prompt}\n\nDescribe the image in detail."},
             {
               "type": "image_url",
               "image_url": {
