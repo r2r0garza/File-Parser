@@ -1,6 +1,7 @@
 import logging
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import tempfile
@@ -17,6 +18,15 @@ import pytesseract
 from PIL import Image
 
 app = FastAPI()
+
+# Enable CORS for all origins (for development; restrict in production)
+app.add_middleware(
+  CORSMiddleware,
+  allow_origins=["*"],
+  allow_credentials=True,
+  allow_methods=["*"],
+  allow_headers=["*"],
+)
 
 # Configure logging
 logging.basicConfig(
@@ -300,3 +310,41 @@ async def parse_path(req: ParsePathRequest):
   except Exception as e:
     logger.error(f"Error in /parse-path: {e}")
     raise HTTPException(status_code=500, detail=f"Failed to parse file path: {str(e)}")
+
+# Utility: DataFrame to Markdown
+def dataframe_to_markdown(df):
+  if df.empty:
+    return ""
+  header = "| " + " | ".join(map(str, df.columns)) + " |"
+  separator = "| " + " | ".join(["---"] * len(df.columns)) + " |"
+  rows = ["| " + " | ".join(map(str, row)) + " |" for row in df.values]
+  return "\n".join([header, separator] + rows)
+
+# /xlsx-to-md endpoint
+from fastapi.responses import PlainTextResponse
+
+@app.post("/xlsx-to-md", response_class=PlainTextResponse)
+async def xlsx_to_markdown(file: UploadFile = File(...)):
+  try:
+    suffix = os.path.splitext(file.filename)[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+      content = await file.read()
+      tmp.write(content)
+      tmp_path = tmp.name
+
+    # Read all sheets
+    xls = pd.ExcelFile(tmp_path, engine="openpyxl")
+    md_parts = []
+    for sheet_name in xls.sheet_names:
+      df = xls.parse(sheet_name)
+      md = dataframe_to_markdown(df)
+      if md.strip():
+        md_parts.append(f"## {sheet_name}\n\n{md}\n")
+    os.remove(tmp_path)
+
+    if not md_parts:
+      return "No data found in the XLSX file."
+    return "\n".join(md_parts)
+  except Exception as e:
+    logger.error(f"Error in /xlsx-to-md: {e}")
+    raise HTTPException(status_code=500, detail=f"Failed to convert XLSX to Markdown: {str(e)}")
