@@ -246,7 +246,7 @@ def parse_file_router(file_path: str, filetype: str) -> str:
     return parse_legacy_office(file_path, ".xlsx")
   elif filetype == "ppt":
     return parse_legacy_office(file_path, ".pptx")
-  elif filetype in {"txt", "md", "log"}:
+  elif filetype in {"txt", "md", "log", "ts"}:
     return parse_text(file_path)
   elif filetype == "pdf":
     return parse_pdf(file_path)

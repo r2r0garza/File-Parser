@@ -34,3 +34,16 @@ def test_parse_path_not_found():
   response = client.post("/parse-path", json={"filepath": "nonexistent.txt"})
   assert response.status_code == 404
   assert response.json()["detail"] == "File not found."
+
+def test_parse_ts_endpoint():
+  with tempfile.NamedTemporaryFile(mode="w+", suffix=".ts", delete=False) as f:
+    f.write("const x: number = 42;")
+    f.flush()
+    path = f.name
+  with open(path, "rb") as f:
+    response = client.post("/parse", files={"file": ("test.ts", f, "text/plain")})
+  os.remove(path)
+  assert response.status_code == 200
+  data = response.json()
+  assert data["filetype"] == "ts"
+  assert "const x: number = 42;" in data["content"]

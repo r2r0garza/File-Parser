@@ -24,6 +24,17 @@ def test_parse_csv():
   finally:
     os.remove(path)
 
+def test_parse_ts():
+  with tempfile.NamedTemporaryFile(mode="w+", suffix=".ts", delete=False) as f:
+    f.write("let y: string = 'hello';")
+    f.flush()
+    path = f.name
+  try:
+    result = parse_text(path)
+    assert result == "let y: string = 'hello';"
+  finally:
+    os.remove(path)
+
 def test_parse_docx():
   import docx
   path = tempfile.mktemp(suffix=".docx")
