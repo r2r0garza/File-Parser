@@ -135,6 +135,15 @@ def parse_text(file_path: str) -> str:
     logger.error(f"Error parsing text file: {e}")
     return ""
 
+# Parser for .feature files (Gherkin)
+def parse_feature(file_path: str) -> str:
+  try:
+    with open(file_path, "r", encoding="utf-8") as f:
+      return f.read()
+  except Exception as e:
+    logger.error(f"Error parsing .feature file: {e}")
+    return ""
+
 # Parser for .pdf files with OCR fallback
 def parse_pdf(file_path: str) -> str:
   try:
@@ -248,6 +257,8 @@ def parse_file_router(file_path: str, filetype: str) -> str:
     return parse_legacy_office(file_path, ".pptx")
   elif filetype in {"txt", "md", "log", "ts"}:
     return parse_text(file_path)
+  elif filetype == "feature":
+    return parse_feature(file_path)
   elif filetype == "pdf":
     return parse_pdf(file_path)
   elif filetype == "csv":

@@ -1,6 +1,6 @@
 import os
 import tempfile
-from main import parse_docx, parse_text, parse_pdf, parse_csv, parse_xlsx, parse_pptx, parse_eml, parse_image
+from main import parse_docx, parse_text, parse_pdf, parse_csv, parse_xlsx, parse_pptx, parse_eml, parse_image, parse_feature
 
 def test_parse_text():
   with tempfile.NamedTemporaryFile(mode="w+", suffix=".txt", delete=False) as f:
@@ -131,6 +131,26 @@ def test_parse_image_ocr_low_quality():
     result = parse_image(path)
     # Accept partial or noisy OCR result
     assert "Blurry" in result or result.strip() != ""
+  finally:
+    os.remove(path)
+
+def test_parse_feature():
+  with tempfile.NamedTemporaryFile(mode="w+", suffix=".feature", delete=False) as f:
+    f.write("""Feature: Example feature
+  Scenario: Example scenario
+    Given something
+    When something happens
+    Then something should result
+""")
+    f.flush()
+    path = f.name
+  try:
+    result = parse_feature(path)
+    assert "Feature: Example feature" in result
+    assert "Scenario: Example scenario" in result
+    assert "Given something" in result
+    assert "When something happens" in result
+    assert "Then something should result" in result
   finally:
     os.remove(path)
 
