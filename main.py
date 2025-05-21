@@ -46,13 +46,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Ensure logs go to stdout in Docker
+if not logger.hasHandlers():
+  handler = logging.StreamHandler()
+  handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+  logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
 @app.get("/")
 def read_root():
   return {"message": "Document Parser API is running."}
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-  logger.error(f"Unhandled error: {exc}")
+  logger.error(f"Unhandled error: {exc}", exc_info=True)
   return JSONResponse(
     status_code=500,
     content={"detail": "Internal server error."}
@@ -106,7 +113,7 @@ def parse_docx(file_path: str) -> str:
     text = "\n".join([para.text for para in doc.paragraphs])
     return text
   except Exception as e:
-    logger.error(f"Error parsing .docx: {e}")
+    logger.error(f"Error parsing .docx: {e}", exc_info=True)
     return ""
 
 # Parser for legacy .doc, .xls, .ppt files using unoconv + libreoffice
@@ -123,7 +130,7 @@ def parse_legacy_office(file_path: str, target_ext: str) -> str:
     else:
       return ""
   except Exception as e:
-    logger.error(f"Error parsing legacy office file: {e}")
+    logger.error(f"Error parsing legacy office file: {e}", exc_info=True)
     return "Legacy format parsing requires unoconv/libreoffice installed."
 
 # Parser for text files (.txt, .md, .log)
@@ -132,7 +139,7 @@ def parse_text(file_path: str) -> str:
     with open(file_path, "r", encoding="utf-8") as f:
       return f.read()
   except Exception as e:
-    logger.error(f"Error parsing text file: {e}")
+    logger.error(f"Error parsing text file: {e}", exc_info=True)
     return ""
 
 # Parser for .feature files (Gherkin)
@@ -141,27 +148,29 @@ def parse_feature(file_path: str) -> str:
     with open(file_path, "r", encoding="utf-8") as f:
       return f.read()
   except Exception as e:
-    logger.error(f"Error parsing .feature file: {e}")
+    logger.error(f"Error parsing .feature file: {e}", exc_info=True)
     return ""
 
 # Parser for .pdf files with OCR fallback
 def parse_pdf(file_path: str) -> str:
+  logger.info(f"parse_pdf: starting for {file_path}")
   try:
     text = ""
     with pdfplumber.open(file_path) as pdf:
-      for page in pdf.pages:
+      logger.info(f"parse_pdf: opened PDF, {len(pdf.pages)} pages")
+      for i, page in enumerate(pdf.pages):
+        logger.info(f"parse_pdf: processing page {i+1}/{len(pdf.pages)}")
         page_text = page.extract_text()
         if page_text and page_text.strip():
           text += page_text
         else:
-          # OCR fallback for image-based PDF pages
-          img = page.to_image(resolution=300).original
-          ocr_text = pytesseract.image_to_string(img)
-          text += ocr_text
+          logger.info(f"parse_pdf: page {i+1} has no extractable text, skipping OCR")
+          text += f"\n[No extractable text on page {i+1}]\n"
         text += "\n"
+    logger.info(f"parse_pdf: finished, total length {len(text)}")
     return text.strip()
   except Exception as e:
-    logger.error(f"Error parsing .pdf: {e}")
+    logger.error(f"Error parsing .pdf: {e}", exc_info=True)
     return ""
 
 # Parser for .csv files
@@ -170,7 +179,7 @@ def parse_csv(file_path: str) -> str:
     df = pd.read_csv(file_path)
     return df.to_csv(index=False)
   except Exception as e:
-    logger.error(f"Error parsing .csv: {e}")
+    logger.error(f"Error parsing .csv: {e}", exc_info=True)
     return ""
 
 # Parser for .xlsx files
@@ -179,7 +188,7 @@ def parse_xlsx(file_path: str) -> str:
     df = pd.read_excel(file_path, engine="openpyxl")
     return df.to_csv(index=False)
   except Exception as e:
-    logger.error(f"Error parsing .xlsx: {e}")
+    logger.error(f"Error parsing .xlsx: {e}", exc_info=True)
     return ""
 
 # Parser for .pptx files
@@ -193,7 +202,7 @@ def parse_pptx(file_path: str) -> str:
           text_runs.append(shape.text)
     return "\n".join(text_runs)
   except Exception as e:
-    logger.error(f"Error parsing .pptx: {e}")
+    logger.error(f"Error parsing .pptx: {e}", exc_info=True)
     return ""
 
 # Parser for .eml files
@@ -213,7 +222,7 @@ def parse_eml(file_path: str) -> str:
       body = msg.get_content()
     return f"Subject: {subject}\nFrom: {from_}\nTo: {to}\n\n{body}"
   except Exception as e:
-    logger.error(f"Error parsing .eml: {e}")
+    logger.error(f"Error parsing .eml: {e}", exc_info=True)
     return ""
 
 # Parser for .msg files (Outlook)
@@ -226,7 +235,7 @@ def parse_msg(file_path: str) -> str:
     body = msg.body or ""
     return f"Subject: {subject}\nFrom: {sender}\nTo: {to}\n\n{body}"
   except Exception as e:
-    logger.error(f"Error parsing .msg: {e}")
+    logger.error(f"Error parsing .msg: {e}", exc_info=True)
     return ""
 
 # Parser for image files (.png, .jpg, .jpeg) using pytesseract or LLaVA
@@ -242,11 +251,12 @@ def parse_image(file_path: str) -> str:
       # happens in the /caption endpoint
       return "[Image processed by LLaVA. Use /caption endpoint for detailed description.]"
   except Exception as e:
-    logger.error(f"Error parsing image file: {e}")
+    logger.error(f"Error parsing image file: {e}", exc_info=True)
     return ""
 
 # Router for dispatching to parsers
 def parse_file_router(file_path: str, filetype: str) -> str:
+  logger.info(f"parse_file_router: dispatching for {file_path} type {filetype}")
   if filetype == "docx":
     return parse_docx(file_path)
   elif filetype == "doc":
@@ -278,6 +288,7 @@ def parse_file_router(file_path: str, filetype: str) -> str:
     return ""
 
 def extract_metadata(file_path: str, filetype: str) -> dict:
+  logger.info(f"extract_metadata: for {file_path} type {filetype}")
   meta = {"size_bytes": get_file_size(file_path)}
   if filetype == "pdf":
     meta["page_count"] = get_pdf_page_count(file_path)
@@ -287,12 +298,14 @@ def extract_metadata(file_path: str, filetype: str) -> dict:
     meta.update(get_csv_shape(file_path))
   elif filetype == "xlsx":
     meta.update(get_xlsx_shape(file_path))
+  logger.info(f"extract_metadata: result {meta}")
   return meta
 
 # /parse endpoint for file uploads
 @app.post("/parse")
 async def parse_upload(file: UploadFile = File(...)):
   try:
+    logger.info(f"Received file upload: {file.filename}")
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
       content = await file.read()
@@ -300,10 +313,33 @@ async def parse_upload(file: UploadFile = File(...)):
       tmp_path = tmp.name
 
     filetype = detect_file_type(file.filename)
-    parsed_content = parse_file_router(tmp_path, filetype)
-    metadata = extract_metadata(tmp_path, filetype)
+    logger.info(f"Detected file type: {filetype}")
+    logger.info(f"Temporary file path: {tmp_path}")
 
-    os.remove(tmp_path)
+    try:
+      logger.info("Calling parse_file_router")
+      parsed_content = parse_file_router(tmp_path, filetype)
+      logger.info("Returned from parse_file_router")
+    except Exception as e:
+      logger.error(f"Exception in parse_file_router: {e}", exc_info=True)
+      raise
+
+    try:
+      logger.info("Calling extract_metadata")
+      metadata = extract_metadata(tmp_path, filetype)
+      logger.info("Returned from extract_metadata")
+    except Exception as e:
+      logger.error(f"Exception in extract_metadata: {e}", exc_info=True)
+      raise
+
+    logger.info(f"Parsed content length: {len(parsed_content)}")
+    logger.info(f"Extracted metadata: {metadata}")
+
+    try:
+      os.remove(tmp_path)
+      logger.info(f"Temporary file removed: {tmp_path}")
+    except Exception as e:
+      logger.error(f"Exception removing temp file: {e}", exc_info=True)
 
     return {
       "filename": file.filename,
@@ -312,7 +348,7 @@ async def parse_upload(file: UploadFile = File(...)):
       "content": parsed_content
     }
   except Exception as e:
-    logger.error(f"Error in /parse: {e}")
+    logger.error(f"Error in /parse: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail=f"Failed to parse file: {str(e)}")
 
 # Pydantic model for /parse-path
@@ -322,12 +358,30 @@ class ParsePathRequest(BaseModel):
 @app.post("/parse-path")
 async def parse_path(req: ParsePathRequest):
   try:
+    logger.info(f"Received parse-path request: {req.filepath}")
     if not os.path.isfile(req.filepath):
+      logger.warning(f"File not found: {req.filepath}")
       raise HTTPException(status_code=404, detail="File not found.")
 
-    filetype = detect_file_type(req.filepath)
-    parsed_content = parse_file_router(req.filepath, filetype)
-    metadata = extract_metadata(req.filepath, filetype)
+    try:
+      logger.info("Calling parse_file_router")
+      filetype = detect_file_type(req.filepath)
+      parsed_content = parse_file_router(req.filepath, filetype)
+      logger.info("Returned from parse_file_router")
+    except Exception as e:
+      logger.error(f"Exception in parse_file_router: {e}", exc_info=True)
+      raise
+
+    try:
+      logger.info("Calling extract_metadata")
+      metadata = extract_metadata(req.filepath, filetype)
+      logger.info("Returned from extract_metadata")
+    except Exception as e:
+      logger.error(f"Exception in extract_metadata: {e}", exc_info=True)
+      raise
+
+    logger.info(f"Parsed content length: {len(parsed_content)}")
+    logger.info(f"Extracted metadata: {metadata}")
 
     return {
       "filename": os.path.basename(req.filepath),
@@ -336,7 +390,7 @@ async def parse_path(req: ParsePathRequest):
       "content": parsed_content
     }
   except Exception as e:
-    logger.error(f"Error in /parse-path: {e}")
+    logger.error(f"Error in /parse-path: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail=f"Failed to parse file path: {str(e)}")
 
 # Utility: DataFrame to Markdown
@@ -354,6 +408,7 @@ from fastapi.responses import PlainTextResponse
 @app.post("/xlsx-to-md", response_class=PlainTextResponse)
 async def xlsx_to_markdown(file: UploadFile = File(...)):
   try:
+    logger.info(f"Received XLSX upload: {file.filename}")
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
       content = await file.read()
@@ -369,12 +424,14 @@ async def xlsx_to_markdown(file: UploadFile = File(...)):
       if md.strip():
         md_parts.append(f"## {sheet_name}\n\n{md}\n")
     os.remove(tmp_path)
+    logger.info(f"Temporary file removed: {tmp_path}")
 
     if not md_parts:
+      logger.info("No data found in the XLSX file.")
       return "No data found in the XLSX file."
     return "\n".join(md_parts)
   except Exception as e:
-    logger.error(f"Error in /xlsx-to-md: {e}")
+    logger.error(f"Error in /xlsx-to-md: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail=f"Failed to convert XLSX to Markdown: {str(e)}")
 
 # /caption endpoint for LLaVA image processing
@@ -384,7 +441,9 @@ async def caption(
   system_prompt: str = Form("You are a helpful assistant.")
 ):
   try:
+    logger.info(f"Received image for caption: {image.filename}")
     if not LLAVA_USE:
+      logger.warning("LLaVA integration is disabled.")
       raise HTTPException(
         status_code=400, 
         detail="LLaVA integration is disabled. Set LLAVA_USE=true in .env to enable."
@@ -428,5 +487,5 @@ async def caption(
     
     return response.json()
   except Exception as e:
-    logger.error(f"Error in /caption: {e}")
+    logger.error(f"Error in /caption: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail=f"Failed to process image with LLaVA: {str(e)}")
