@@ -157,15 +157,43 @@ def parse_pdf(file_path: str) -> str:
   try:
     text = ""
     with pdfplumber.open(file_path) as pdf:
-      logger.info(f"parse_pdf: opened PDF, {len(pdf.pages)} pages")
+      total_pages = len(pdf.pages)
+      logger.info(f"parse_pdf: opened PDF, {total_pages} pages")
+      do_ocr = total_pages <= 150
       for i, page in enumerate(pdf.pages):
-        logger.info(f"parse_pdf: processing page {i+1}/{len(pdf.pages)}")
+        logger.info(f"parse_pdf: processing page {i+1}/{total_pages}")
         page_text = page.extract_text()
         if page_text and page_text.strip():
           text += page_text
         else:
-          logger.info(f"parse_pdf: page {i+1} has no extractable text, skipping OCR")
-          text += f"\n[No extractable text on page {i+1}]\n"
+          if not do_ocr:
+            logger.info(f"parse_pdf: page {i+1} has no text, skipping OCR due to page count > 150")
+            text += f"\n[No extractable text on page {i+1} and OCR skipped due to document size]\n"
+            continue
+          logger.info(f"parse_pdf: page {i+1} has no text, running OCR")
+          try:
+            img = page.to_image(resolution=300).original
+            logger.info(f"parse_pdf: page {i+1} image size: {img.size if hasattr(img, 'size') else 'unknown'}")
+            # Downscale if too large
+            max_dim = 1000
+            if hasattr(img, "size"):
+              w, h = img.size
+              if w > max_dim or h > max_dim:
+                scale = min(max_dim / w, max_dim / h)
+                new_size = (int(w * scale), int(h * scale))
+                logger.info(f"parse_pdf: page {i+1} downscaling image from {img.size} to {new_size}")
+                img = img.resize(new_size)
+            if hasattr(img, "size") and (img.size[0] > 2000 or img.size[1] > 2000):
+              logger.warning(f"parse_pdf: page {i+1} image still too large after downscaling, skipping OCR")
+              text += f"\n[OCR skipped on page {i+1} due to image size]\n"
+            else:
+              logger.info(f"parse_pdf: page {i+1} running pytesseract OCR")
+              ocr_text = pytesseract.image_to_string(img)
+              logger.info(f"parse_pdf: page {i+1} finished pytesseract OCR")
+              text += ocr_text
+          except Exception as ocr_exc:
+            logger.error(f"parse_pdf: OCR failed on page {i+1}: {ocr_exc}", exc_info=True)
+            text += f"\n[OCR failed on page {i+1}]\n"
         text += "\n"
     logger.info(f"parse_pdf: finished, total length {len(text)}")
     return text.strip()
@@ -315,6 +343,24 @@ async def parse_upload(file: UploadFile = File(...)):
     filetype = detect_file_type(file.filename)
     logger.info(f"Detected file type: {filetype}")
     logger.info(f"Temporary file path: {tmp_path}")
+
+    # Special check for PDF page count limit
+    if filetype == "pdf":
+      try:
+        with pdfplumber.open(tmp_path) as pdf:
+          page_count = len(pdf.pages)
+        logger.info(f"PDF page count: {page_count}")
+        if page_count > 210:
+          os.remove(tmp_path)
+          logger.warning(f"Rejected PDF with {page_count} pages (limit is 210)")
+          return JSONResponse(
+            status_code=400,
+            content={"detail": f"PDF files with more than 200 pages are not accepted. Your file has {page_count} pages."}
+          )
+      except Exception as e:
+        logger.error(f"Error checking PDF page count: {e}", exc_info=True)
+        os.remove(tmp_path)
+        raise HTTPException(status_code=400, detail="Failed to check PDF page count.")
 
     try:
       logger.info("Calling parse_file_router")

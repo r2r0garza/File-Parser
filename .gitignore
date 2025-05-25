@@ -1,3 +1,7 @@
 /.DS_Store
 venv/
 .env
+.env-out
+feature-file-example/
+file-parser.tar
+file-parser-x86.tar
