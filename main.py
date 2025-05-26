@@ -30,10 +30,16 @@ LLAVA_MODEL_NAME = os.getenv("LLAVA_MODEL_NAME", "llava-1.6-mistral-7b")
 
 app = FastAPI()
 
+cors_urls = os.getenv("CORS_URLS", "*")
+if cors_urls.strip() == "*":
+    allow_origins = ["*"]
+else:
+    allow_origins = [url.strip() for url in cors_urls.split(",") if url.strip()]
+
 # Enable CORS for all origins (for development; restrict in production)
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=["*"],
+  allow_origins=allow_origins,
   allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],
